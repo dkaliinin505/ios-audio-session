@@ -1,102 +1,118 @@
-# ios-audio-session
+# Capacitor Audio Session Plugin
 
-Small plugin to handle music interruption
+A Capacitor plugin for iOS audio session management with comprehensive interruption handling.
 
-## Install
+## Features
+
+- Configure audio session for background playback
+- Handle audio interruptions (calls, system alerts, etc.)
+- Detect route changes (headphones plugged/unplugged)
+- Background audio support
+- TypeScript support
+
+## Installation
 
 ```bash
-npm install ios-audio-session
+npm install capacitor-audio-session
 npx cap sync
+```
+
+## iOS Setup
+
+Add background audio capability to your `Info.plist`:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+</array>
+```
+
+## Usage
+
+```typescript
+import { AudioSession } from 'capacitor-audio-session';
+
+// Configure the audio session
+await AudioSession.configureAudioSession();
+
+// Add listeners for interruptions
+await AudioSession.addListeners();
+
+// Listen for interruption events
+AudioSession.addListener('audioInterruption', (event) => {
+  if (event.type === 'began') {
+    // Pause your audio
+    console.log('Audio interrupted:', event.reason);
+  } else if (event.type === 'ended' && event.options?.should_resume) {
+    // Resume your audio
+    console.log('Can resume audio');
+  }
+});
+
+// Set audio session active/inactive
+await AudioSession.setActive({ active: true });
 ```
 
 ## API
 
-<docgen-index>
-
-* [`configureAudioSession()`](#configureaudiosession)
-* [`addListeners()`](#addlisteners)
-* [`removeAllListeners()`](#removealllisteners)
-* [`setActive(...)`](#setactive)
-* [`addListener('audioInterruption', ...)`](#addlisteneraudiointerruption-)
-* [Interfaces](#interfaces)
-
-</docgen-index>
-
-<docgen-api>
-<!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
-
 ### configureAudioSession()
 
+Configures the audio session for playback with background audio support.
+
 ```typescript
-configureAudioSession() => Promise<void>
+await AudioSession.configureAudioSession();
 ```
-
---------------------
-
 
 ### addListeners()
 
+Adds listeners for audio interruptions and route changes.
+
 ```typescript
-addListeners() => Promise<void>
+await AudioSession.addListeners();
 ```
-
---------------------
-
 
 ### removeAllListeners()
 
-```typescript
-removeAllListeners() => Promise<void>
-```
-
---------------------
-
-
-### setActive(...)
+Removes all audio session listeners.
 
 ```typescript
-setActive(options: { active: boolean; }) => Promise<void>
+await AudioSession.removeAllListeners();
 ```
 
-| Param         | Type                              |
-| ------------- | --------------------------------- |
-| **`options`** | <code>{ active: boolean; }</code> |
+### setActive(options)
 
---------------------
-
-
-### addListener('audioInterruption', ...)
+Sets the audio session active or inactive.
 
 ```typescript
-addListener(eventName: 'audioInterruption', listenerFunc: (event: AudioInterruptionEvent) => void) => Promise<PluginListenerHandle>
+await AudioSession.setActive({ active: true });
 ```
 
-| Param              | Type                                                                                          |
-| ------------------ | --------------------------------------------------------------------------------------------- |
-| **`eventName`**    | <code>'audioInterruption'</code>                                                              |
-| **`listenerFunc`** | <code>(event: <a href="#audiointerruptionevent">AudioInterruptionEvent</a>) =&gt; void</code> |
+### Event Listeners
 
-**Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
+#### audioInterruption
 
---------------------
+Fired when audio is interrupted or interruption ends.
 
+```typescript
+AudioSession.addListener('audioInterruption', (event) => {
+  console.log('Interruption event:', event);
+});
+```
 
-### Interfaces
+Event object:
+- `type`: 'began' | 'ended'
+- `reason`: 'call' | 'app_suspended' | 'builtin_app' | 'system' | 'route_change' | 'category_change'
+- `options.should_resume`: boolean (only for 'ended' events)
 
+## Platform Support
 
-#### PluginListenerHandle
+| Platform | Status |
+|----------|--------|
+| iOS      | ✅     |
+| Android  | ❌     |
+| Web      | ⚠️ (stub implementation) |
 
-| Prop         | Type                                      |
-| ------------ | ----------------------------------------- |
-| **`remove`** | <code>() =&gt; Promise&lt;void&gt;</code> |
+## License
 
-
-#### AudioInterruptionEvent
-
-| Prop          | Type                                                                                                       |
-| ------------- | ---------------------------------------------------------------------------------------------------------- |
-| **`type`**    | <code>'began' \| 'ended'</code>                                                                            |
-| **`reason`**  | <code>'call' \| 'app_suspended' \| 'builtin_app' \| 'system' \| 'route_change' \| 'category_change'</code> |
-| **`options`** | <code>{ should_resume: boolean; }</code>                                                                   |
-
-</docgen-api>
+MIT
