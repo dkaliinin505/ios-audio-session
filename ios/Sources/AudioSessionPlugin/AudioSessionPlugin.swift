@@ -23,32 +23,13 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         super.load()
         print("AudioSessionPlugin: Plugin loaded")
 
-        // Configure audio session immediately on load
-        configureInitialAudioSession()
+        // Don't configure audio session immediately on load
+        // Wait for explicit configuration call from JavaScript
     }
 
     private func configureInitialAudioSession() {
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-
-            // Configure for playback with mixing (important for MSE)
-            try audioSession.setCategory(
-                .playback,
-                mode: .default,
-                options: [
-                    .allowBluetooth,
-                    .allowBluetoothA2DP,
-                    .allowAirPlay,
-                    .mixWithOthers // This helps with MSE compatibility
-                ]
-            )
-
-            // Don't activate here - let the web audio handle initial activation
-            print("AudioSessionPlugin: Initial audio session configured")
-
-        } catch {
-            print("AudioSessionPlugin: Failed to configure initial audio session: \(error)")
-        }
+        // This method is now unused - keeping for reference
+        // Audio session will be configured when configureAudioSession() is called
     }
 
     @objc func configureAudioSession(_ call: CAPPluginCall) {
@@ -74,23 +55,38 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                     options.insert(.duckOthers)
                 }
 
+                // First try to configure the category without activating
                 try audioSession.setCategory(
                     .playback,
                     mode: .default,
                     options: options
                 )
 
+                print("AudioSessionPlugin: Audio session category configured")
+
                 self.isConfigured = true
-                print("AudioSessionPlugin: Audio session configured successfully")
                 call.resolve([
                     "configured": true,
                     "category": "playback",
-                    "options": Array(options.rawValue.words)
+                    "options": []
                 ])
 
-            } catch {
-                print("AudioSessionPlugin: Failed to configure audio session: \(error)")
-                call.reject("Failed to configure audio session: \(error.localizedDescription)")
+            } catch let error as NSError {
+                print("AudioSessionPlugin: Failed to configure audio session: \(error) - Code: \(error.code)")
+
+                var errorMessage = "Failed to configure audio session"
+                switch error.code {
+                case -50:
+                    errorMessage = "Invalid audio session property or state"
+                case -560557673: // kAudioSessionNotInitialized
+                    errorMessage = "Audio session not initialized"
+                case -560030580: // kAudioSessionAlreadyInitialized
+                    errorMessage = "Audio session already initialized"
+                default:
+                    errorMessage = "Audio session error: \(error.localizedDescription)"
+                }
+
+                call.reject(errorMessage)
             }
         }
     }
@@ -148,7 +144,15 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 let audioSession = AVAudioSession.sharedInstance()
 
                 if active {
-                    // When activating, use no options to take control
+                    // When activating, first ensure we have a category set
+                    if !self.isConfigured {
+                        // Set a basic category if none has been configured
+                        try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP])
+                        self.isConfigured = true
+                        print("AudioSessionPlugin: Set default category before activation")
+                    }
+
+                    // Activate the session
                     try audioSession.setActive(true, options: [])
                 } else {
                     // When deactivating, notify other apps they can resume
@@ -158,9 +162,20 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 print("AudioSessionPlugin: Audio session set to \(active ? "active" : "inactive")")
                 call.resolve(["active": active])
 
-            } catch {
-                print("AudioSessionPlugin: Failed to set audio session active: \(error)")
-                call.reject("Failed to set audio session active: \(error.localizedDescription)")
+            } catch let error as NSError {
+                print("AudioSessionPlugin: Failed to set audio session active: \(error) - Code: \(error.code)")
+
+                var errorMessage = "Failed to set audio session active"
+                switch error.code {
+                case -50:
+                    errorMessage = "Invalid audio session state for activation"
+                case 560030580: // kAudioSessionIncompatibleCategory
+                    errorMessage = "Incompatible audio session category"
+                default:
+                    errorMessage = "Audio session activation error: \(error.localizedDescription)"
+                }
+
+                call.reject(errorMessage)
             }
         }
     }
