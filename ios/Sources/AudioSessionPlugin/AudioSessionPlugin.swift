@@ -34,57 +34,63 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func configureAudioSession(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
+            // --- DEBUG LOGS: start ---
+            let allowMixing = call.getBool("allowMixing") ?? false
+            let backgroundAudio = call.getBool("backgroundAudio") ?? true
+            print("🔊 AudioSessionPlugin.configureAudioSession() called")
+            print("    • allowMixing: \(allowMixing)")
+            print("    • backgroundAudio: \(backgroundAudio)")
+            // --- end debug ---
+
             do {
                 let audioSession = AVAudioSession.sharedInstance()
 
-                // Get options from call
-                let allowMixing = call.getBool("allowMixing") ?? false
-                let backgroundAudio = call.getBool("backgroundAudio") ?? true
-
+                // assemble options
                 var options: AVAudioSession.CategoryOptions = [
                     .allowBluetooth,
                     .allowBluetoothA2DP
                 ]
+                if allowMixing { options.insert(.mixWithOthers) }
+                if backgroundAudio { options.insert(.duckOthers) }
 
-                if allowMixing {
-                    options.insert(.mixWithOthers)
-                }
+                // --- DEBUG LOGS: before setCategory ---
+                print("    → About to setCategory(.playback, mode:.default, options: \(options))")
+                print("       current session.category: \(audioSession.category.rawValue)")
+                print("       current session.categoryOptions rawValue: \(audioSession.categoryOptions.rawValue)")
+                // --- end debug ---
 
-                if backgroundAudio {
-                    options.insert(.duckOthers)
-                }
+                try audioSession.setCategory(.playback, mode: .default, options: options)
 
-                // First try to configure the category without activating
-                try audioSession.setCategory(
-                    .playback,
-                    mode: .default,
-                    options: options
-                )
-
-                print("AudioSessionPlugin: Audio session category configured")
+                // --- DEBUG LOGS: after setCategory success ---
+                print("    ✅ setCategory succeeded!")
+                print("       new session.category: \(audioSession.category.rawValue)")
+                print("       new session.categoryOptions rawValue: \(audioSession.categoryOptions.rawValue)")
+                // --- end debug ---
 
                 self.isConfigured = true
                 call.resolve([
                     "configured": true,
-                    "category": "playback",
-                    "options": []
+                    "category": audioSession.category.rawValue,
+                    "optionsRaw": audioSession.categoryOptions.rawValue
                 ])
-
-            } catch let error as NSError {
-                print("AudioSessionPlugin: Failed to configure audio session: \(error) - Code: \(error.code)")
+            }
+            catch let error as NSError {
+                // --- DEBUG LOGS: on error ---
+                print("    ❌ setCategory failed with NSError: domain=\(error.domain), code=\(error.code)")
+                print("       attempted options rawValue: \(String(describing: (error.userInfo[AVAudioSessionCategoryOptionsKey] as? UInt)))")
+                // --- end debug ---
 
                 var errorMessage = "Failed to configure audio session"
                 switch error.code {
                 case -50:
                     errorMessage = "Invalid audio session property or state"
-                case -560557673: // kAudioSessionNotInitialized
+                case -560557673:
                     errorMessage = "Audio session not initialized"
-                case -560030580: // kAudioSessionAlreadyInitialized
+                case -560030580:
                     errorMessage = "Audio session already initialized"
                 default:
                     errorMessage = "Audio session error: \(error.localizedDescription)"
                 }
-
                 call.reject(errorMessage)
             }
         }
