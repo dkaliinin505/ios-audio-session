@@ -43,8 +43,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
 
                 var options: AVAudioSession.CategoryOptions = [
                     .allowBluetooth,
-                    .allowBluetoothA2DP,
-                    .allowAirPlay
+                    .allowBluetoothA2DP
                 ]
 
                 if allowMixing {
