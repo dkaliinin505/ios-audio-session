@@ -13,7 +13,7 @@ A Capacitor plugin for iOS audio session management with comprehensive interrupt
 ## Installation
 
 ```bash
-npm install capacitor-audio-session
+npm install ios-audio-session
 npx cap sync
 ```
 
@@ -31,7 +31,7 @@ Add background audio capability to your `Info.plist`:
 ## Usage
 
 ```typescript
-import { AudioSession } from 'capacitor-audio-session';
+import { AudioSession } from 'ios-audio-session';
 
 // Configure the audio session
 await AudioSession.configureAudioSession();
