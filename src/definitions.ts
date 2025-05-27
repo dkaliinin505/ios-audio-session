@@ -6,7 +6,7 @@ export interface AudioSessionPlugin {
 
   addListeners(): Promise<{ listenersAdded: boolean }>;
 
-  removeAllListeners(): Promise<{ listenersRemoved: boolean }>;
+  removeAudioListeners(): Promise<{ listenersRemoved: boolean }>;
 
   setActive(options: { active: boolean }): Promise<{ active: boolean }>;
 
@@ -17,21 +17,6 @@ export interface AudioSessionPlugin {
     currentTime?: number;
     isPlaying?: boolean;
   }): Promise<{ updated: boolean }>;
-
-  addListener(
-      eventName: 'audioInterruption',
-      listenerFunc: (event: AudioInterruptionEvent) => void
-  ): Promise<PluginListenerHandle>;
-
-  addListener(
-      eventName: 'audioRouteChange',
-      listenerFunc: (event: AudioRouteChangeEvent) => void
-  ): Promise<PluginListenerHandle>;
-
-  addListener(
-      eventName: 'appStateChange',
-      listenerFunc: (event: AppStateChangeEvent) => void
-  ): Promise<PluginListenerHandle>;
 }
 
 export interface AudioInterruptionEvent {
@@ -51,8 +36,4 @@ export interface AudioRouteChangeEvent {
 export interface AppStateChangeEvent {
   type: 'background' | 'foreground';
   timestamp: number;
-}
-
-export interface PluginListenerHandle {
-  remove(): Promise<void>;
 }

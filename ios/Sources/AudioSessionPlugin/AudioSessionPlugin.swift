@@ -10,7 +10,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "configureAudioSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "addListeners", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "removeAllListeners", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "removeAudioListeners", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setActive", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateNowPlaying", returnType: CAPPluginReturnPromise)
     ]
@@ -96,6 +96,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func addListeners(_ call: CAPPluginCall) {
+        // Remove existing observers first
         NotificationCenter.default.removeObserver(self)
 
         // Add interruption observer
@@ -133,7 +134,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["listenersAdded": true])
     }
 
-    @objc func removeAllListeners(_ call: CAPPluginCall) {
+    @objc func removeAudioListeners(_ call: CAPPluginCall) {
         NotificationCenter.default.removeObserver(self)
         print("AudioSessionPlugin: All listeners removed")
         call.resolve(["listenersRemoved": true])
