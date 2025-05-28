@@ -31,8 +31,8 @@ export interface AudioInterruptionEvent {
 
 export interface AudioRouteChangeEvent {
   type: 'route_change';
-  reason: 'device_unavailable' | 'device_available' | 'category_change';
-  action: 'pause' | 'continue';
+  reason: 'device_unavailable' | 'device_available' | 'category_change' | 'audio_focus_lost' | 'audio_focus_gained';
+  action: 'pause' | 'continue' | 'resume';
   timestamp: number;
 }
 

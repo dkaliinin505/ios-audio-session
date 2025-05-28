@@ -20,9 +20,9 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     private var wasPlayingBeforeInterruption = false
     private var listenersAdded = false
 
-    // Event deduplication
     private var lastRouteChangeEvent: [String: Any]?
     private var lastInterruptionEvent: [String: Any]?
+    private var audioFocusLost = false // Track if we lost audio focus
     private let eventDeduplicationInterval: TimeInterval = 1.0 // 1 second
 
     override public func load() {
@@ -56,10 +56,11 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 try audioSession.setCategory(
                     .playback,
                     mode: .default,
-                    options: [.mixWithOthers, .duckOthers]
+                    options: options
                 )
 
-                try audioSession.setActive(true, options: [.mixWithOthers, .duckOthers])
+                // Activate the session immediately after configuration
+                try audioSession.setActive(true, options: [])
 
                 self.isConfigured = true
 
@@ -213,8 +214,30 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     // MARK: - Event Deduplication Helper
-    private func isDuplicateEvent(_ eventData: [String: Any], lastEvent: [String: Any]?, eventType: String) -> Bool {
-        guard let lastEvent = lastEvent,
+    private func isDuplicateRouteChangeEvent(_ eventData: [String: Any]) -> Bool {
+        guard let lastEvent = lastRouteChangeEvent,
+              let currentTimestamp = eventData["timestamp"] as? TimeInterval,
+              let lastTimestamp = lastEvent["timestamp"] as? TimeInterval else {
+            return false
+        }
+
+        // Check if events are too close in time
+        let timeDifference = abs(currentTimestamp - lastTimestamp)
+        if timeDifference > eventDeduplicationInterval {
+            return false
+        }
+
+        // Compare event content (excluding timestamp)
+        var currentEventWithoutTimestamp = eventData
+        var lastEventWithoutTimestamp = lastEvent
+        currentEventWithoutTimestamp.removeValue(forKey: "timestamp")
+        lastEventWithoutTimestamp.removeValue(forKey: "timestamp")
+
+        return NSDictionary(dictionary: currentEventWithoutTimestamp).isEqual(to: lastEventWithoutTimestamp)
+    }
+
+    private func isDuplicateInterruptionEvent(_ eventData: [String: Any]) -> Bool {
+        guard let lastEvent = lastInterruptionEvent,
               let currentTimestamp = eventData["timestamp"] as? TimeInterval,
               let lastTimestamp = lastEvent["timestamp"] as? TimeInterval else {
             return false
@@ -309,7 +332,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         // Check for duplicate events
-        if !isDuplicateEvent(eventData, lastEvent: lastInterruptionEvent, eventType: "interruption") {
+        if !isDuplicateInterruptionEvent(eventData) {
             lastInterruptionEvent = eventData
             notifyListeners("audioInterruption", data: eventData)
         } else {
@@ -343,9 +366,30 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             print("AudioSessionPlugin: Route change - new device available")
 
         case .override, .categoryChange:
-            eventData["reason"] = "category_change"
-            eventData["action"] = "pause"
-            print("AudioSessionPlugin: Route change - category/override")
+            // Check if another app is currently using audio
+            let audioSession = AVAudioSession.sharedInstance()
+            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
+
+            if isOtherAudioPlaying && !audioFocusLost {
+                // Another app just took audio focus
+                eventData["reason"] = "audio_focus_lost"
+                eventData["action"] = "pause"
+                audioFocusLost = true
+                print("AudioSessionPlugin: Route change - audio focus lost to another app")
+
+            } else if !isOtherAudioPlaying && audioFocusLost {
+                // Audio focus was returned to us
+                eventData["reason"] = "audio_focus_gained"
+                eventData["action"] = "resume"
+                audioFocusLost = false
+                print("AudioSessionPlugin: Route change - audio focus regained")
+
+            } else {
+                // Generic category change
+                eventData["reason"] = "category_change"
+                eventData["action"] = "pause"
+                print("AudioSessionPlugin: Route change - category/override (generic)")
+            }
 
         case .wakeFromSleep:
             eventData["reason"] = "wake_from_sleep"
@@ -363,7 +407,8 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             eventData["action"] = "continue"
         }
 
-        if !isDuplicateEvent(eventData, lastEvent: lastRouteChangeEvent, eventType: "route_change") {
+        // Check for duplicate events
+        if !isDuplicateRouteChangeEvent(eventData) {
             lastRouteChangeEvent = eventData
             notifyListeners("audioRouteChange", data: eventData)
         } else {
