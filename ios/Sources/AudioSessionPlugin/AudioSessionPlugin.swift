@@ -38,11 +38,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 let audioSession = AVAudioSession.sharedInstance()
 
-                var options: AVAudioSession.CategoryOptions = [
-                    .allowBluetooth,
-                    .allowBluetoothA2DP,
-                    .allowAirPlay
-                ]
+                var options: AVAudioSession.CategoryOptions = []
 
                 if allowMixing {
                     options.insert(.mixWithOthers)
@@ -52,7 +48,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                     options.insert(.duckOthers)
                 }
 
-                // Use the dynamic options instead of static values
+                // The main problem that if we use another options such as allowBluetooth, we get error 50
                 try audioSession.setCategory(
                     .playback,
                     mode: .default,
