@@ -1,6 +1,6 @@
 {
   "name": "ios-audio-session",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Small plugin to handle music interruption",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",

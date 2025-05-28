@@ -41,7 +41,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 var options: AVAudioSession.CategoryOptions = []
 
                 if allowMixing {
-                    options.insert(.mixWithOthers)
+                    //options.insert(.mixWithOthers)
                 }
 
                 if backgroundAudio {
@@ -153,9 +153,6 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 if active {
                     if !self.isConfigured {
                         try audioSession.setCategory(.playback, mode: .default, options: [
-                            .allowBluetooth,
-                            .allowBluetoothA2DP,
-                            .mixWithOthers,
                             .duckOthers
                         ])
                         self.isConfigured = true
@@ -362,29 +359,26 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             print("AudioSessionPlugin: Route change - new device available")
 
         case .override, .categoryChange:
-            // Check if another app is currently using audio
             let audioSession = AVAudioSession.sharedInstance()
-            let isOtherAudioPlaying = audioSession.isOtherAudioPlaying
+            let shouldSilence = audioSession.secondaryAudioShouldBeSilencedHint
 
-            if isOtherAudioPlaying && !audioFocusLost {
-                // Another app just took audio focus
+            if shouldSilence && !audioFocusLost {
+                // another app (Telegram call) just took focus
                 eventData["reason"] = "audio_focus_lost"
                 eventData["action"] = "pause"
                 audioFocusLost = true
-                print("AudioSessionPlugin: Route change - audio focus lost to another app")
+                print("AudioSessionPlugin: focus lost – must pause")
 
-            } else if !isOtherAudioPlaying && audioFocusLost {
-                // Audio focus was returned to us
+            } else if !shouldSilence && audioFocusLost {
+                // our priority restored
                 eventData["reason"] = "audio_focus_gained"
                 eventData["action"] = "resume"
                 audioFocusLost = false
-                print("AudioSessionPlugin: Route change - audio focus regained")
+                print("AudioSessionPlugin: focus regained – may resume")
 
             } else {
-                // Generic category change
-                eventData["reason"] = "category_change"
-                eventData["action"] = "pause"
-                print("AudioSessionPlugin: Route change - category/override (generic)")
+                // benign category change: ignore
+                return
             }
 
         case .wakeFromSleep:
