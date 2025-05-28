@@ -18,18 +18,16 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     private var isConfigured = false
     private var wasInterrupted = false
     private var wasPlayingBeforeInterruption = false
+    private var listenersAdded = false
+
+    // Event deduplication
+    private var lastRouteChangeEvent: [String: Any]?
+    private var lastInterruptionEvent: [String: Any]?
+    private let eventDeduplicationInterval: TimeInterval = 1.0 // 1 second
 
     override public func load() {
         super.load()
         print("AudioSessionPlugin: Plugin loaded")
-
-        // Don't configure audio session immediately on load
-        // Wait for explicit configuration call from JavaScript
-    }
-
-    private func configureInitialAudioSession() {
-        // This method is now unused - keeping for reference
-        // Audio session will be configured when configureAudioSession() is called
     }
 
     @objc func configureAudioSession(_ call: CAPPluginCall) {
@@ -40,29 +38,41 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 let audioSession = AVAudioSession.sharedInstance()
 
-                // assemble options
                 var options: AVAudioSession.CategoryOptions = [
                     .allowBluetooth,
-                    .allowBluetoothA2DP
+                    .allowBluetoothA2DP,
+                    .allowAirPlay
                 ]
-                if allowMixing { options.insert(.mixWithOthers) }
-                if backgroundAudio { options.insert(.duckOthers) }
 
-                //Temporary use static values, then we change it if this configurations will allow to handle interuptions, not route changes
+                if allowMixing {
+                    options.insert(.mixWithOthers)
+                }
+
+                if backgroundAudio {
+                    options.insert(.duckOthers)
+                }
+
+                // Use the dynamic options instead of static values
                 try audioSession.setCategory(
                     .playback,
                     mode: .default,
                     options: [.mixWithOthers, .duckOthers]
                 )
 
+                try audioSession.setActive(true, options: [.mixWithOthers, .duckOthers])
+
                 self.isConfigured = true
+
                 call.resolve([
                     "configured": true,
                     "category": audioSession.category.rawValue,
                     "optionsRaw": audioSession.categoryOptions.rawValue
                 ])
+
+                print("AudioSessionPlugin: Audio session configured and activated")
             }
             catch let error as NSError {
+                print("AudioSessionPlugin: Configuration error: \(error)")
 
                 var errorMessage = "Failed to configure audio session"
                 switch error.code {
@@ -81,6 +91,13 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func addListeners(_ call: CAPPluginCall) {
+        // Prevent multiple listener registration
+        if listenersAdded {
+            print("AudioSessionPlugin: Listeners already added, skipping")
+            call.resolve(["listenersAdded": true])
+            return
+        }
+
         // Remove existing observers first
         NotificationCenter.default.removeObserver(self)
 
@@ -115,12 +132,16 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             object: nil
         )
 
+        listenersAdded = true
         print("AudioSessionPlugin: All listeners added")
         call.resolve(["listenersAdded": true])
     }
 
     @objc func removeAudioListeners(_ call: CAPPluginCall) {
         NotificationCenter.default.removeObserver(self)
+        listenersAdded = false
+        lastRouteChangeEvent = nil
+        lastInterruptionEvent = nil
         print("AudioSessionPlugin: All listeners removed")
         call.resolve(["listenersRemoved": true])
     }
@@ -133,18 +154,19 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 let audioSession = AVAudioSession.sharedInstance()
 
                 if active {
-                    // When activating, first ensure we have a category set
                     if !self.isConfigured {
-                        // Set a basic category if none has been configured
-                        try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP])
+                        try audioSession.setCategory(.playback, mode: .default, options: [
+                            .allowBluetooth,
+                            .allowBluetoothA2DP,
+                            .mixWithOthers,
+                            .duckOthers
+                        ])
                         self.isConfigured = true
                         print("AudioSessionPlugin: Set default category before activation")
                     }
 
-                    // Activate the session
                     try audioSession.setActive(true, options: [])
                 } else {
-                    // When deactivating, notify other apps they can resume
                     try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
                 }
 
@@ -158,8 +180,10 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 switch error.code {
                 case -50:
                     errorMessage = "Invalid audio session state for activation"
-                case 560030580: // kAudioSessionIncompatibleCategory
+                case 560030580:
                     errorMessage = "Incompatible audio session category"
+                case -560030580: // Negative version of the same error
+                    errorMessage = "Audio session already active/inactive"
                 default:
                     errorMessage = "Audio session activation error: \(error.localizedDescription)"
                 }
@@ -188,6 +212,29 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["updated": true])
     }
 
+    // MARK: - Event Deduplication Helper
+    private func isDuplicateEvent(_ eventData: [String: Any], lastEvent: [String: Any]?, eventType: String) -> Bool {
+        guard let lastEvent = lastEvent,
+              let currentTimestamp = eventData["timestamp"] as? TimeInterval,
+              let lastTimestamp = lastEvent["timestamp"] as? TimeInterval else {
+            return false
+        }
+
+        // Check if events are too close in time
+        let timeDifference = abs(currentTimestamp - lastTimestamp)
+        if timeDifference > eventDeduplicationInterval {
+            return false
+        }
+
+        // Compare event content (excluding timestamp)
+        var currentEventWithoutTimestamp = eventData
+        var lastEventWithoutTimestamp = lastEvent
+        currentEventWithoutTimestamp.removeValue(forKey: "timestamp")
+        lastEventWithoutTimestamp.removeValue(forKey: "timestamp")
+
+        return NSDictionary(dictionary: currentEventWithoutTimestamp).isEqual(to: lastEventWithoutTimestamp)
+    }
+
     @objc private func audioSessionInterruption(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -196,16 +243,17 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        var eventData: [String: Any] = [:]
+        var eventData: [String: Any] = [
+            "timestamp": Date().timeIntervalSince1970
+        ]
+
         print("AudioSessionPlugin: Interruption notification received - type: \(type.rawValue)")
 
         switch type {
         case .began:
             wasInterrupted = true
             eventData["type"] = "began"
-            eventData["timestamp"] = Date().timeIntervalSince1970
 
-            // Determine interruption reason
             if let reasonValue = userInfo[AVAudioSessionInterruptionReasonKey] as? UInt,
                let reason = AVAudioSession.InterruptionReason(rawValue: reasonValue) {
                 switch reason {
@@ -226,7 +274,6 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
 
         case .ended:
             eventData["type"] = "ended"
-            eventData["timestamp"] = Date().timeIntervalSince1970
 
             var shouldResume = false
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
@@ -236,12 +283,17 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
 
             eventData["shouldResume"] = shouldResume
 
-            // Try to reactivate audio session after interruption
             if shouldResume {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     do {
                         try AVAudioSession.sharedInstance().setActive(true, options: [])
                         print("AudioSessionPlugin: Audio session reactivated after interruption")
+
+                        // Notify JS that session is ready for playback
+                        self.notifyListeners("audioSessionReady", data: [
+                            "timestamp": Date().timeIntervalSince1970,
+                            "reason": "interruption_ended"
+                        ])
                     } catch {
                         print("AudioSessionPlugin: Failed to reactivate audio session: \(error)")
                     }
@@ -256,8 +308,13 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        // Notify JavaScript with more detail
-        notifyListeners("audioInterruption", data: eventData)
+        // Check for duplicate events
+        if !isDuplicateEvent(eventData, lastEvent: lastInterruptionEvent, eventType: "interruption") {
+            lastInterruptionEvent = eventData
+            notifyListeners("audioInterruption", data: eventData)
+        } else {
+            print("AudioSessionPlugin: Duplicate interruption event filtered out")
+        }
     }
 
     @objc private func audioSessionRouteChange(notification: Notification) {
@@ -270,35 +327,48 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         print("AudioSessionPlugin: Route change notification received - reason: \(reason.rawValue)")
 
         var eventData: [String: Any] = [
-            "timestamp": Date().timeIntervalSince1970
+            "timestamp": Date().timeIntervalSince1970,
+            "type": "route_change"
         ]
 
         switch reason {
         case .oldDeviceUnavailable:
-            // Headphones unplugged, etc.
-            eventData["type"] = "route_change"
             eventData["reason"] = "device_unavailable"
-            eventData["action"] = "pause" // Suggest pausing
+            eventData["action"] = "pause"
             print("AudioSessionPlugin: Route change - device unavailable")
 
         case .newDeviceAvailable:
-            eventData["type"] = "route_change"
             eventData["reason"] = "device_available"
-            eventData["action"] = "continue" // Can continue playing
+            eventData["action"] = "continue"
             print("AudioSessionPlugin: Route change - new device available")
 
         case .override, .categoryChange:
-            eventData["type"] = "route_change"
             eventData["reason"] = "category_change"
             eventData["action"] = "pause"
             print("AudioSessionPlugin: Route change - category/override")
 
+        case .wakeFromSleep:
+            eventData["reason"] = "wake_from_sleep"
+            eventData["action"] = "continue"
+            print("AudioSessionPlugin: Route change - wake from sleep")
+
+        case .noSuitableRouteForCategory:
+            eventData["reason"] = "no_suitable_route"
+            eventData["action"] = "pause"
+            print("AudioSessionPlugin: Route change - no suitable route")
+
         default:
-            print("AudioSessionPlugin: Route change - \(reason.rawValue)")
-            return
+            print("AudioSessionPlugin: Route change - other reason: \(reason.rawValue)")
+            eventData["reason"] = "other"
+            eventData["action"] = "continue"
         }
 
-        notifyListeners("audioRouteChange", data: eventData)
+        if !isDuplicateEvent(eventData, lastEvent: lastRouteChangeEvent, eventType: "route_change") {
+            lastRouteChangeEvent = eventData
+            notifyListeners("audioRouteChange", data: eventData)
+        } else {
+            print("AudioSessionPlugin: Duplicate route change event filtered out")
+        }
     }
 
     @objc private func appDidEnterBackground(notification: Notification) {
@@ -306,6 +376,17 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             "type": "background",
             "timestamp": Date().timeIntervalSince1970
         ]
+
+        // Try to keep audio session active in background
+        DispatchQueue.main.async {
+            do {
+                try AVAudioSession.sharedInstance().setActive(true, options: [])
+                print("AudioSessionPlugin: Maintained audio session in background")
+            } catch {
+                print("AudioSessionPlugin: Failed to maintain audio session in background: \(error)")
+            }
+        }
+
         notifyListeners("appStateChange", data: eventData)
     }
 
@@ -314,6 +395,17 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
             "type": "foreground",
             "timestamp": Date().timeIntervalSince1970
         ]
+
+        // Ensure audio session is active when returning to foreground
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            do {
+                try AVAudioSession.sharedInstance().setActive(true, options: [])
+                print("AudioSessionPlugin: Reactivated audio session in foreground")
+            } catch {
+                print("AudioSessionPlugin: Failed to reactivate audio session in foreground: \(error)")
+            }
+        }
+
         notifyListeners("appStateChange", data: eventData)
     }
 
