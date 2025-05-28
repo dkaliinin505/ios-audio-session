@@ -34,13 +34,8 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func configureAudioSession(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            // --- DEBUG LOGS: start ---
             let allowMixing = call.getBool("allowMixing") ?? false
             let backgroundAudio = call.getBool("backgroundAudio") ?? true
-            print("🔊 AudioSessionPlugin.configureAudioSession() called")
-            print("    • allowMixing: \(allowMixing)")
-            print("    • backgroundAudio: \(backgroundAudio)")
-            // --- end debug ---
 
             do {
                 let audioSession = AVAudioSession.sharedInstance()
@@ -53,19 +48,12 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 if allowMixing { options.insert(.mixWithOthers) }
                 if backgroundAudio { options.insert(.duckOthers) }
 
-                // --- DEBUG LOGS: before setCategory ---
-                print("    → About to setCategory(.playback, mode:.default, options: \(options))")
-                print("       current session.category: \(audioSession.category.rawValue)")
-                print("       current session.categoryOptions rawValue: \(audioSession.categoryOptions.rawValue)")
-                // --- end debug ---
-
-                try audioSession.setCategory(.playback, mode: .default, options: options)
-
-                // --- DEBUG LOGS: after setCategory success ---
-                print("    ✅ setCategory succeeded!")
-                print("       new session.category: \(audioSession.category.rawValue)")
-                print("       new session.categoryOptions rawValue: \(audioSession.categoryOptions.rawValue)")
-                // --- end debug ---
+                //Temporary use static values, then we change it if this configurations will allow to handle interuptions, not route changes
+                try audioSession.setCategory(
+                    .playback,
+                    mode: .default,
+                    options: [.mixWithOthers, .duckOthers]
+                )
 
                 self.isConfigured = true
                 call.resolve([
@@ -75,10 +63,6 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
                 ])
             }
             catch let error as NSError {
-                // --- DEBUG LOGS: on error ---
-                print("    ❌ setCategory failed with NSError: domain=\(error.domain), code=\(error.code)")
-                print("       attempted options rawValue: \(String(describing: (error.userInfo[AVAudioSessionCategoryOptionsKey] as? UInt)))")
-                // --- end debug ---
 
                 var errorMessage = "Failed to configure audio session"
                 switch error.code {
@@ -213,6 +197,7 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         var eventData: [String: Any] = [:]
+        print("AudioSessionPlugin: Interruption notification received - type: \(type.rawValue)")
 
         switch type {
         case .began:
@@ -281,6 +266,8 @@ public class AudioSessionPlugin: CAPPlugin, CAPBridgedPlugin {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
             return
         }
+
+        print("AudioSessionPlugin: Route change notification received - reason: \(reason.rawValue)")
 
         var eventData: [String: Any] = [
             "timestamp": Date().timeIntervalSince1970
