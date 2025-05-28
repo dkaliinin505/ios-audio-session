@@ -1,7 +1,10 @@
-export interface AudioSessionPlugin {
+import type { Plugin } from '@capacitor/core';
+
+export interface AudioSessionPlugin extends Plugin {
   configureAudioSession(options?: {
     allowMixing?: boolean;
     backgroundAudio?: boolean;
+    category?: 'playback' | 'playAndRecord' | 'record' | 'ambient' | 'soloAmbient';
   }): Promise<{ configured: boolean; category: string; options: number[] }>;
 
   addListeners(): Promise<{ listenersAdded: boolean }>;
